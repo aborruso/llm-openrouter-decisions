@@ -1,0 +1,16 @@
+{
+  "department": {
+    "type": "choice",
+    "instructions": "Which city department should handle the report in the text field?",
+    "criteria": {
+      "public works": "roads, potholes, street lights, trees, water, traffic lights",
+      "environment": "waste, noise, graffiti",
+      "registry and taxes": "residence, requests, waste tax",
+      "transport": "buses, bikes, parking",
+      "public records": "records requests, data requests",
+      "other": null
+    }
+  },
+  "urgent": {"type": "noul", "instructions": "The report describes an immediate danger to people's safety."},
+  "personal_data": {"type": "noul", "instructions": "The text field contains personal data such as ID numbers, social security numbers or phone numbers."}
+}

@@ -107,9 +107,9 @@ llm -m jev14 -a https://static.simonwillison.net/static/2025/two-pelicans.jpg \
 ```json
 {"type": "noul", "noul": 0.97}
 ```
-Jev 1.14 also answers `box` questions: where in the image is the thing described. The answer gives the edges as fractions of the image width and height, from the top-left corner. Here is [examples/chart.png](examples/chart.png):
+Jev 1.14 also answers `box` questions: where in the image is the thing described. The answer gives the edges as fractions of the image width and height, from the top-left corner. Here is [examples/chart.png](https://raw.githubusercontent.com/aborruso/llm-openrouter-decisions/main/examples/chart.png):
 
-![A population pyramid of Madrid by age and sex, with a legend in the top right corner](examples/chart.png)
+![A population pyramid of Madrid by age and sex, with a legend in the top right corner](https://raw.githubusercontent.com/aborruso/llm-openrouter-decisions/main/examples/chart.png)
 
 ```bash
 llm -m jev14 -a examples/chart.png -s 'the legend of the chart' -o answer_type box ''
@@ -119,7 +119,7 @@ llm -m jev14 -a examples/chart.png -s 'the legend of the chart' -o answer_type b
 ```
 Drawn on the image (red rectangle), the box finds the legend, but covers only its left half: the color swatches and part of the labels.
 
-![The same chart with a red rectangle over the left half of the legend](examples/chart-box.png)
+![The same chart with a red rectangle over the left half of the legend](https://raw.githubusercontent.com/aborruso/llm-openrouter-decisions/main/examples/chart-box.png)
 
 Boxes are approximate, and a box question always returns a box, even when the target is not in the image. Ask a yes/no question about it in the same request (see the next section) and only trust the box when that answer is high.
 

@@ -2,6 +2,7 @@
 
 ## 2026-10-25
 
+- Release 0.1a0, first alpha: published on GitHub as a pre-release and on PyPI.
 - Project created from the `simonw/llm-plugin` cookiecutter template; code derived from `llm-typesafe` (Apache-2.0).
 - Registers every model of the OpenRouter decisions catalog (`/api/v1/models?output_modalities=decisions`, 30 models), cached for an hour.
 - Answer types: noul, choice, score, box. Image attachments on models that read images (PNG/JPEG only for Jev). `-o questions` for several questions per request. `-o input_format json`.

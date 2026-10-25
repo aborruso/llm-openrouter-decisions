@@ -1,0 +1,18 @@
+Thank you, Simon Willison, for the work you have been doing for years to explain AI to everyone, in the open, and for LLM, a tool that lets anyone use AI models in a smart, convenient and elegant way. This plugin only exists because LLM does.
+⠀
+I have released llm-openrouter-decisions, an LLM plugin that brings the decision models available on OpenRouter to the terminal.
+⠀
+Decision models, also called System One models, do not write text. You send them some content, the "state", plus a closed question, and they answer with numbers: the probability that a statement is true, a category with a probability for each option, a position on an ordered scale, or a box around something in an image. They are fast and cheap, which makes them a good fit for classifying, filtering and triaging many items from the command line. In the example in the carousel, 16 reports sent by residents to a city, with 3 questions each (which department, is it urgent, does it contain personal data), cost $0.00033.
+⠀
+LLM already had two plugins by Simon: llm-typesafe for TypeSafe's Jev and llm-openai-decisions for OpenAI's GPT-6 Luna. Each one uses one model and its provider's key. The OpenRouter catalog now lists 30 decision models from 13 makers, including Perplexity, Cloudflare, Liquid, Inception, Upstage, Microsoft and the open weight Kev. With a single OpenRouter key you can try them all on your own data, changing nothing but -m. They give different probabilities for the same question, and differ in accuracy, speed and price, so it is worth testing more than one before picking.
+⠀
+Compared with the two existing plugins it also adds:
+- box answers, where something is in an image (Jev 1.14 only for now), which neither of them supports yet;
+- images and several questions in one request, which llm-typesafe does not have;
+- JSON input, which llm-openai-decisions does not have.
+⠀
+It is a first alpha (0.1a0), on PyPI and GitHub. The request validation, response handling and tests are derived from llm-typesafe.
+⠀
+llm install llm-openrouter-decisions
+⠀
+https://github.com/aborruso/llm-openrouter-decisions

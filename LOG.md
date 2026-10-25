@@ -2,6 +2,8 @@
 
 ## 2026-10-25
 
+- LinkedIn carousel in `carousel/`: 8 Typst cards, 4:5, PDF for the document post, plus the post text.
+- Commented on simonw/llm-typesafe#1 (OpenRouter support); opened simonw/llm#1821 to add the plugin to the LLM plugin directory.
 - Release 0.1a0, first alpha: published on GitHub as a pre-release and on PyPI.
 - Project created from the `simonw/llm-plugin` cookiecutter template; code derived from `llm-typesafe` (Apache-2.0).
 - Registers every model of the OpenRouter decisions catalog (`/api/v1/models?output_modalities=decisions`, 30 models), cached for an hour.

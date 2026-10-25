@@ -7,4 +7,5 @@
 - Answer types: noul, choice, score, box. Image attachments on models that read images (PNG/JPEG only for Jev). `-o questions` for several questions per request. `-o input_format json`.
 - 82 tests pass. Live checks on Jev 1.14 (text, images, box, multiple questions), Microsoft Decision-1 (text), remote image URL.
 - `:free` models return HTTP 404 when the OpenRouter privacy settings exclude training on user data.
+- Removed the PyPI publish workflow: releases are uploaded by hand with twine.
 - README examples: `examples/city_reports.csv` made with fauxdata, `examples/chart.png` and `chart-box.png` from Eurostat URB_CPOP1 data.

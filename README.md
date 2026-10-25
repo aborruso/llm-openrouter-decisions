@@ -11,7 +11,7 @@ Use the decision models of the [OpenRouter Decisions API](https://openrouter.ai/
 
 Decision models (also called System One models) do not write text. You send them some content, the *state*, plus a closed question, and they answer with numbers: the probability that a statement is true, a category with a probability for each option, a position on an ordered scale, or a box around something in an image. They are fast and very cheap, which makes them a good fit for classifying, filtering and triaging many items from the command line.
 
-This plugin registers every model in the [OpenRouter decision models catalog](https://openrouter.ai/models?output_modalities=decisions) (30 as of October 2026: TypeSafe Jev, OpenAI GPT-6 Luna Decisions, Perplexity Decider, Cloudflare Clef, Liquid d1, Inception Mercury Decide, Microsoft Decision-1, the open weight Kev and more) using a single OpenRouter API key.
+Decision models are not just TypeSafe and OpenAI: there are many of them, from many makers. This plugin registers every model in the [OpenRouter decision models catalog](https://openrouter.ai/models?output_modalities=decisions), 30 from 13 makers as of October 2026: TypeSafe Jev, OpenAI GPT-6 Luna Decisions, Perplexity Decider, Cloudflare Clef, Liquid d1, Inception Mercury Decide, Upstage Solar Decide, Microsoft Decision-1, the open weight Kev and more. With a single OpenRouter API key you can try them all and compare them on your own data, changing nothing but `-m`. Models differ in accuracy, speed, price and input types, and their probabilities differ on the same question, so it is worth testing more than one before picking.
 
 - Installation
 - Usage

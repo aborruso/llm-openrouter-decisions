@@ -13,6 +13,8 @@ Decision models (also called System One models) do not write text. You send them
 
 Decision models are not just TypeSafe and OpenAI: there are many of them, from many makers. This plugin registers every model in the [OpenRouter decision models catalog](https://openrouter.ai/models?output_modalities=decisions), 30 from 13 makers as of October 2026: TypeSafe Jev, OpenAI GPT-6 Luna Decisions, Perplexity Decider, Cloudflare Clef, Liquid d1, Inception Mercury Decide, Upstage Solar Decide, Microsoft Decision-1, the open weight Kev and more. With a single OpenRouter API key you can try them all and compare them on your own data, changing nothing but `-m`. Models differ in accuracy, speed, price and input types, and their probabilities differ on the same question, so it is worth testing more than one before picking.
 
+To ask the same kind of questions about every cell of a column in [VisiData](https://www.visidata.org/), see [vd-jev](https://github.com/ondata/vd-jev), a VisiData plugin that uses the same OpenRouter Decisions API.
+
 - Installation
 - Usage
 - Yes/no

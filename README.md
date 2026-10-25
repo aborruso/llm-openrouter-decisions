@@ -5,6 +5,8 @@
 [![Tests](https://github.com/aborruso/llm-openrouter-decisions/actions/workflows/test.yml/badge.svg)](https://github.com/aborruso/llm-openrouter-decisions/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/aborruso/llm-openrouter-decisions/blob/main/LICENSE)
 
+A heartfelt thank you to [Simon Willison](https://simonwillison.net/), for the work he has been doing for years to explain AI to everyone, in the open, and for [LLM](https://llm.datasette.io/), an exceptional tool that lets anyone use AI models in a smart, convenient and elegant way. This plugin only exists because LLM does.
+
 Use the decision models of the [OpenRouter Decisions API](https://openrouter.ai/docs/guides/community/jev.md) with [LLM](https://llm.datasette.io/).
 
 Decision models (also called System One models) do not write text. You send them some content, the *state*, plus a closed question, and they answer with numbers: the probability that a statement is true, a category with a probability for each option, a position on an ordered scale, or a box around something in an image. They are fast and very cheap, which makes them a good fit for classifying, filtering and triaging many items from the command line.

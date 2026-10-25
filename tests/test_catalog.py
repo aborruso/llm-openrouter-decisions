@@ -3,7 +3,6 @@ import os
 
 import httpx2
 import llm
-import pytest
 
 import llm_openrouter_decisions as plugin
 

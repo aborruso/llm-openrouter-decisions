@@ -191,7 +191,7 @@ class _Decision:
             self.attachment_types = IMAGE_TYPES - {"image/webp"} if jev else IMAGE_TYPES
 
     def __str__(self):
-        return "OpenRouter Decisions: {}".format(self.model_id)
+        return f"OpenRouter Decisions: {self.model_id}"
 
     def build_payload(self, prompt):
         inputs, instructions, images = [], [], []

@@ -24,7 +24,7 @@ To ask the same kind of questions about every cell of a column in [VisiData](htt
 - Several questions in one request
 - JSON input
 - Classifying the rows of a CSV file
-- Large batches from Python
+- Large batches
 - Things to know
 - Further reading
 - Development
@@ -193,13 +193,55 @@ llm -m jev14 -s 'The report describes an immediate danger to people'"'"'s safety
 cat report.txt | llm -t urgent
 ```
 
-## Large batches from Python
+## Large batches
 
 Search [OpenAlex](https://openalex.org/) for scholarly articles with "transparency" in the title and you get a strange mix. Studies on how open local governments are sit next to papers on transparent polymer films, quantum optics, explainable AI and corporate reporting. The word is the same, the subject is not, and a keyword search cannot tell them apart. Can a decision model find the articles about the transparency of governments and public administrations, and how long does it take on hundreds of titles?
 
 [examples/publications.csv](examples/publications.csv) holds 500 titles of English articles from 2024, a random sample with a fixed seed, downloaded by [examples/fetch_publications.sh](examples/fetch_publications.sh) (it needs a free OpenAlex API key in `OPENALEX_API_KEY`). Running the script again gives the same file.
 
-Each `llm` call in a shell loop starts a new process, about four seconds per row in the loop above, so 500 titles would take more than half an hour. The async Python API sends the requests concurrently. This is [examples/batch.py](examples/batch.py):
+Each `llm` call in a shell loop starts a new process, about four seconds per row in the loop above, so 500 titles would take more than half an hour. The `batch` command asks the same question about every row of a CSV, TSV, JSON or JSONL file, from one process and with several requests at a time. Try it on the first 100 titles:
+```bash
+llm openrouter-decisions batch examples/publications.csv -m jev14 \
+  -s 'The publication is about the transparency of governments or public administrations.' \
+  --column title --limit 100 --output scored.csv
+```
+```
+100 rows, 0 errors, 4.0 seconds, $0.0012514 ($0.0000125 per row)
+```
+`--column title` sends only the title; without it, each row goes as a JSON object, the same as `-o input_format json`. The output is the input plus four columns: `row` (the row number in the input), `answer` (the JSON answer, as printed by `llm`), `p` (the probability, for yes/no questions) and `error`. Rows are written as soon as they are answered, so they are not in input order: sort by `row` or by `p`. The other options of the model work as usual, for example `-o answer_type choice -o criteria '{...}'` or `-o questions '{...}'`; `llm openrouter-decisions batch --help` lists everything.
+
+The [Python script](#from-python) below scored all 500 titles in 18.2 seconds for $0.0063. Its answers, sorted by probability, are in [examples/publications_scored.csv](examples/publications_scored.csv). 115 titles got 0.5 or more, 249 less than 0.1. A few rows show what the model is reading:
+
+| p | title |
+| - | - |
+| 0.96 | Passive transparency in small brazilian municipalities |
+| 0.96 | Comparing Public Procurement Transparency Mechanisms Between EU Member States |
+| 0.65 | Does Central Bank Transparency Matter for Inflation: Role of Inflation Targeting |
+| 0.62 | Lobbying transparency and attitudes towards interest groups: a survey experiment |
+| 0.08 | CORPORATE GOVERNANCE AND FINANCIAL TRANSPARENCY: EVIDENCE FROM INDONESIAN MANUFACTURING COMPANIES |
+| 0.07 | A state-of-the-art review of AI decision transparency for autonomous shipping |
+| 0.02 | Achieving optical transparency in live animals with absorbing molecules |
+| 0.01 | Switch and phase shift of photon polarization qubits via double Rydberg electromagnetically induced transparency |
+
+A search for "governance" or "state" would have kept the corporate governance paper and the review on autonomous ships; the model puts them at the bottom. Central banks and lobbying rules land in the middle, because they are public matters but not quite public administration: the rows around 0.5 are the ones worth reading by hand, or the sign that the question needs to be more precise. Run it again and some probabilities change by a few hundredths (up to 0.06 between two runs).
+
+### Costs, limits and risks
+
+Every row is a paid request, and nothing stops a large file from becoming a large bill. Before a big run:
+
+- **Measure first.** Run with `--limit 10` or `--limit 100`: the summary shows the cost per row. Multiply by the number of rows. The cost depends on the model, on the length of each row and on the number of questions, and it cannot be guessed from the text: a six-word title cost 287 input tokens with Jev 1.14, because the question and the request format count too.
+- **Set a ceiling.** `--max-cost 0.50` stops sending requests once the spend passes 50 cents. The requests already running still finish, so the total can go over by up to `--concurrency` rows. An [OpenRouter key with a credit limit](https://openrouter.ai/settings/keys) is a second safety net.
+- **Resume, do not pay twice.** If a run stops halfway, run the same command with `--resume`: rows already answered in `--output` are skipped, rows with an error are tried again.
+- **Errors.** Rate limits (HTTP 429), server errors and network errors are retried three times, after 1, 2 and 4 seconds; then the row gets an `error` and the batch goes on. A bad key (401) or no credit (402) stops everything at once.
+- **Concurrency.** The default is 8 requests at a time, the maximum 32. The API documents a rate limit but not its value. On 26 October 2026, on one account, 100 titles with Jev 1.14 took 4.1 seconds with 8, 2.6 with 16 and 2.5 with 32, with no 429. Your limits may differ, and `:free` models have much lower ones.
+- **Privacy.** Every row leaves your machine and goes to OpenRouter and to the provider of the model. Check what is in the file before sending it, especially personal data.
+- **Not deterministic.** Two runs give slightly different probabilities, up to 0.06 apart on these titles.
+- **Logs.** Unlike `llm` prompts, batch answers are not saved in the LLM database, to avoid thousands of records per run. Add `--log` to save them.
+- **No server-side batches.** OpenRouter has an asynchronous [Batch API](https://openrouter.ai/docs/batch-quickstart), but it does not cover the Decisions endpoint, which is still in alpha and may change.
+
+### From Python
+
+The command is built on the async Python API, which you can use directly when you need more control. This is [examples/batch.py](examples/batch.py), which scored the 500 titles:
 ```python
 import asyncio, csv, json, time
 from pathlib import Path
@@ -232,27 +274,14 @@ async def main():
 
 asyncio.run(main())
 ```
-Run it from a clone of this repository. The script imports `llm`, so it needs the plugin in the same environment; with [uv](https://docs.astral.sh/uv/) you do not have to install anything, and the OpenRouter key set with `llm keys set openrouter` is picked up:
+
+It imports `llm`, so it needs the plugin in the same environment; with [uv](https://docs.astral.sh/uv/) you do not have to install anything, and the OpenRouter key set with `llm keys set openrouter` is picked up. Run it from a clone of this repository:
 ```bash
 uv run --no-project --with llm-openrouter-decisions python examples/batch.py
 ```
 ```
 500 titles in 18.2 seconds, $0.00630
 ```
-Eight requests at a time, 500 titles in about 18 seconds for less than one cent. The answers, sorted by probability, are in [examples/publications_scored.csv](examples/publications_scored.csv). 115 titles got 0.5 or more, 249 less than 0.1. A few rows show what the model is reading:
-
-| p | title |
-| - | - |
-| 0.96 | Passive transparency in small brazilian municipalities |
-| 0.96 | Comparing Public Procurement Transparency Mechanisms Between EU Member States |
-| 0.65 | Does Central Bank Transparency Matter for Inflation: Role of Inflation Targeting |
-| 0.62 | Lobbying transparency and attitudes towards interest groups: a survey experiment |
-| 0.08 | CORPORATE GOVERNANCE AND FINANCIAL TRANSPARENCY: EVIDENCE FROM INDONESIAN MANUFACTURING COMPANIES |
-| 0.07 | A state-of-the-art review of AI decision transparency for autonomous shipping |
-| 0.02 | Achieving optical transparency in live animals with absorbing molecules |
-| 0.01 | Switch and phase shift of photon polarization qubits via double Rydberg electromagnetically induced transparency |
-
-A search for "governance" or "state" would have kept the corporate governance paper and the review on autonomous ships; the model puts them at the bottom. Central banks and lobbying rules land in the middle, because they are public matters but not quite public administration: the rows around 0.5 are the ones worth reading by hand, or the sign that the question needs to be more precise. Run the script again and some probabilities change by a few hundredths (up to 0.06 between two runs).
 
 ## Things to know
 
@@ -262,7 +291,7 @@ A search for "governance" or "state" would have kept the corporate governance pa
 - **Free models.** The `:free` models are excluded when your [OpenRouter privacy settings](https://openrouter.ai/settings/privacy) do not allow providers to train on your data. The request fails with HTTP 404 and `Free model training violation`.
 - **Rolling aliases.** IDs that start with `~`, such as `~typesafe/jev-latest`, follow the newest release, so answers can change over time. Use a pinned ID for repeatable results.
 - **Model-specific shapes.** Box questions are Jev 1.14 only. ScaleDown Classify-1 and Respan Span-01 expect their own state shapes, and only Cloudflare Clef Omni reads audio and video, which this plugin does not send yet.
-- **Costs.** The full API response, including `usage.cost` in dollars, is stored in the LLM logs: `llm logs --json`.
+- **Costs.** The full API response, including `usage.cost` in dollars, is stored in the LLM logs: `llm logs --json`. The `batch` command saves it only with `--log`.
 
 ## Further reading
 

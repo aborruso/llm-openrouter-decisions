@@ -1,13 +1,21 @@
 """Single-turn evaluations with the decision models of the OpenRouter Decisions API."""
 
+import asyncio
+import csv
+import io
 import json
+import sys
 import time
+from pathlib import Path
 from typing import Literal
 
+import click
 import httpx2
 import llm
+import pydantic
 from llm.parts import AttachmentPart, TextPart
 from pydantic import Field, model_validator
+from sqlite_utils.utils import Format, rows_from_file
 
 API_URL = "https://openrouter.ai/api/alpha/decisions"
 MODELS_URL = "https://openrouter.ai/api/v1/models?output_modalities=decisions"
@@ -21,6 +29,24 @@ HEADERS = {
 }
 # The Decisions API takes images as base64 data URLs in these formats
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+# batch: seconds to wait before each retry of a 429, 5xx or network error
+RETRY_DELAYS = (1, 2, 4)
+OUTPUT_FIELDS = ["row", "answer", "p", "error"]
+SUFFIX_FORMATS = {
+    ".csv": "csv",
+    ".tsv": "tsv",
+    ".json": "json",
+    ".jsonl": "nl",
+    ".ndjson": "nl",
+}
+
+
+class DecisionError(llm.ModelError):
+    """A failed request; status_code is None for network errors."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def nonempty_string(value):
@@ -246,8 +272,9 @@ class _Decision:
 
     def finish_response(self, response, result, prompt):
         if result.status_code != 200:
-            raise llm.ModelError(
-                f"OpenRouter Decisions HTTP {result.status_code}: {result.text}"
+            raise DecisionError(
+                f"OpenRouter Decisions HTTP {result.status_code}: {result.text}",
+                result.status_code,
             )
         try:
             data = parse_json(result.content)
@@ -290,7 +317,7 @@ class Decision(_Decision, llm.KeyModel):
             with httpx2.Client(timeout=60, follow_redirects=False) as client:
                 result = client.post(API_URL, json=payload, headers=self.headers(key))
         except httpx2.TransportError as ex:
-            raise llm.ModelError(f"OpenRouter Decisions request failed: {ex}") from None
+            raise DecisionError(f"OpenRouter Decisions request failed: {ex}") from None
         yield self.finish_response(response, result, prompt)
 
 
@@ -303,7 +330,7 @@ class AsyncDecision(_Decision, llm.AsyncKeyModel):
                     API_URL, json=payload, headers=self.headers(key)
                 )
         except httpx2.TransportError as ex:
-            raise llm.ModelError(f"OpenRouter Decisions request failed: {ex}") from None
+            raise DecisionError(f"OpenRouter Decisions request failed: {ex}") from None
         yield self.finish_response(response, result, prompt)
 
 
@@ -318,3 +345,291 @@ def register_models(register):
             Decision(definition["id"], modalities),
             AsyncDecision(definition["id"], modalities),
         )
+
+
+def money(value):
+    return "$" + f"{value:.7f}".rstrip("0").rstrip(".")
+
+
+def read_done_rows(path, tabular, delimiter):
+    """Rows already answered in a previous run's output, without errors.
+
+    A last line cut off by an interruption is dropped."""
+    text = path.read_text(encoding="utf-8")
+    if not text.endswith("\n"):
+        text = text[: text.rfind("\n") + 1]
+    if tabular:
+        records = list(csv.DictReader(io.StringIO(text), delimiter=delimiter))
+    else:
+        records = []
+        for line in text.splitlines():
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                pass
+    return [
+        r
+        for r in records
+        if isinstance(r, dict) and str(r.get("row")).isdigit() and not r.get("error")
+    ]
+
+
+async def run_batch(
+    model, jobs, question, options, column, concurrency, max_cost, write, db
+):
+    sem = asyncio.Semaphore(concurrency)
+    state = {"cost": 0.0, "rows": 0, "errors": 0, "stopped": None, "fatal": None}
+
+    async def one(number, row):
+        async with sem:
+            if state["stopped"] or state["fatal"]:
+                return
+            value = row if column is None else row.get(column)
+            if isinstance(value, str):
+                text, opts = value, options
+            else:
+                text = json.dumps(value, ensure_ascii=False)
+                opts = {**options, "input_format": "json"}
+            answer = error = None
+            for delay in (*RETRY_DELAYS, None):
+                try:
+                    response = model.prompt(text, system=question, **opts)
+                    answer = json.loads(await response.text())
+                    break
+                except DecisionError as ex:
+                    if ex.status_code in (401, 402):
+                        state["fatal"] = str(ex)
+                        return
+                    retry = (
+                        ex.status_code is None
+                        or ex.status_code == 429
+                        or ex.status_code >= 500
+                    )
+                    if delay is None or not retry:
+                        error = str(ex)
+                        break
+                    await asyncio.sleep(delay)
+                except (llm.ModelError, ValueError) as ex:
+                    error = str(ex)
+                    break
+            if answer is not None:
+                state["cost"] += (await response.json())["usage"].get("cost") or 0
+                if db is not None:
+                    response.log_to_db(db)
+            state["rows"] += 1
+            state["errors"] += error is not None
+            write(number, row, answer, error)
+            if max_cost is not None and state["cost"] > max_cost:
+                state["stopped"] = f"stopped: --max-cost {max_cost} reached"
+
+    await asyncio.gather(*(one(number, row) for number, row in jobs))
+    return state
+
+
+@llm.hookimpl
+def register_commands(cli):
+    @cli.group(name="openrouter-decisions")
+    def decisions():
+        "Commands relating to the llm-openrouter-decisions plugin"
+
+    @decisions.command()
+    @click.argument(
+        "input_path",
+        type=click.Path(exists=True, dir_okay=False, allow_dash=True, readable=True),
+    )
+    @click.option(
+        "model_id", "-m", "--model", required=True, help="Decision model to use"
+    )
+    @click.option("question", "-s", "--system", help="Question asked about every row")
+    @click.option(
+        "options",
+        "-o",
+        "--option",
+        type=(str, str),
+        multiple=True,
+        help="key/value options for the model",
+    )
+    @click.option(
+        "--column", help="Evaluate only this column - default: the whole row as JSON"
+    )
+    @click.option(
+        "--format",
+        "format_",
+        type=click.Choice(["json", "csv", "tsv", "nl"]),
+        help="Format of input file - defaults to the file extension, then auto-detect",
+    )
+    @click.option(
+        "--output",
+        type=click.Path(dir_okay=False, path_type=Path),
+        help="Write results to this file instead of stdout",
+    )
+    @click.option(
+        "--concurrency",
+        type=click.IntRange(1, 32),
+        default=8,
+        show_default=True,
+        help="Requests sent at the same time",
+    )
+    @click.option("--limit", type=click.IntRange(min=1), help="Only the first N rows")
+    @click.option(
+        "--max-cost",
+        type=click.FloatRange(min=0),
+        help="Stop sending requests once the spend in dollars passes this",
+    )
+    @click.option(
+        "--resume", is_flag=True, help="Skip rows already answered in --output"
+    )
+    @click.option("--log", is_flag=True, help="Log every response to the LLM database")
+    def batch(
+        input_path,
+        model_id,
+        question,
+        options,
+        column,
+        format_,
+        output,
+        concurrency,
+        limit,
+        max_cost,
+        resume,
+        log,
+    ):
+        """Ask the same question about every row of a CSV, TSV, JSON or JSONL file.
+
+        Requests run concurrently. Each output row is the input row plus row
+        (its number in the input), answer (the JSON answer), p (the
+        probability, for yes/no questions) and error. Rows are written as they
+        are answered, so they are not in input order. CSV and TSV input gives
+        CSV and TSV output, JSON and JSONL input gives JSONL.
+
+        Every row is a paid request: try --limit 10 first, the summary shows
+        the cost per row.
+
+        \b
+            llm openrouter-decisions batch titles.csv -m jev14 \\
+              -s 'The publication is about public administration.' \\
+              --column title --output scored.csv
+        """
+        if resume and output is None:
+            raise click.ClickException("--resume needs --output")
+        if not llm.get_key("", "openrouter", "OPENROUTER_KEY"):
+            raise click.ClickException(
+                "No OpenRouter key: run 'llm keys set openrouter' or set OPENROUTER_KEY"
+            )
+        try:
+            model = llm.get_async_model(model_id)
+        except llm.UnknownModelError as ex:
+            raise click.ClickException(str(ex))
+        if not isinstance(model, AsyncDecision):
+            raise click.ClickException(
+                f"{model_id} is not an OpenRouter Decisions model"
+            )
+        try:
+            validated = {
+                k: v for k, v in model.Options(**dict(options)) if v is not None
+            }
+        except pydantic.ValidationError as ex:
+            raise click.ClickException(str(ex))
+        if not question and "questions" not in validated:
+            raise click.ClickException("Supply a question with -s or -o questions")
+
+        if format_ is None:
+            # Sniffing fails on one-column CSV files, so trust the extension first
+            format_ = SUFFIX_FORMATS.get(Path(input_path).suffix.lower())
+        with click.open_file(input_path, "rb") as fp:
+            rows, detected = rows_from_file(
+                fp, Format[format_.upper()] if format_ else None
+            )
+            rows = list(rows)
+        if not rows:
+            raise click.ClickException("No rows in the input")
+        if column is not None and column not in rows[0]:
+            raise click.ClickException(f"No column named {column!r} in the input")
+        tabular = detected in (Format.CSV, Format.TSV)
+        delimiter = "\t" if detected == Format.TSV else ","
+        fields = list(rows[0]) + [f for f in OUTPUT_FIELDS if f not in rows[0]]
+
+        jobs = list(enumerate(rows, 1))[:limit]
+        kept = []
+        if resume and output.exists():
+            kept = read_done_rows(output, tabular, delimiter)
+            done = {int(r["row"]) for r in kept}
+            jobs = [(n, row) for n, row in jobs if n not in done]
+        if output is None:
+            out = sys.stdout
+        else:
+            out = open(output, "w", newline="", encoding="utf-8")  # noqa: SIM115 - closed below
+        writer = csv.DictWriter(
+            out, fieldnames=fields, delimiter=delimiter, extrasaction="ignore"
+        )
+        if tabular:
+            writer.writeheader()
+            writer.writerows(kept)
+        else:
+            out.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in kept)
+
+        def write(number, row, answer, error):
+            p = answer.get("noul") if isinstance(answer, dict) else None
+            if tabular:
+                writer.writerow(
+                    {
+                        **row,
+                        "row": number,
+                        "answer": ""
+                        if answer is None
+                        else json.dumps(answer, ensure_ascii=False),
+                        "p": "" if p is None else p,
+                        "error": error or "",
+                    }
+                )
+            else:
+                record = {
+                    **row,
+                    "row": number,
+                    "answer": answer,
+                    "p": p,
+                    "error": error,
+                }
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+            out.flush()
+
+        db = None
+        if log:
+            import sqlite_utils
+            from llm.cli import logs_db_path
+            from llm.migrations import migrate
+
+            db = sqlite_utils.Database(logs_db_path())
+            migrate(db)
+
+        start = time.perf_counter()
+        try:
+            state = asyncio.run(
+                run_batch(
+                    model,
+                    jobs,
+                    question,
+                    validated,
+                    column,
+                    concurrency,
+                    max_cost,
+                    write,
+                    db,
+                )
+            )
+        finally:
+            if output is not None:
+                out.close()
+        if state["fatal"]:
+            raise click.ClickException(state["fatal"])
+        summary = (
+            f"{state['rows']} rows, {state['errors']} errors, "
+            f"{time.perf_counter() - start:.1f} seconds, {money(state['cost'])}"
+        )
+        if state["rows"]:
+            summary += f" ({money(state['cost'] / state['rows'])} per row)"
+        if kept:
+            summary += f", {len(kept)} already done"
+        click.echo(summary, err=True)
+        if state["stopped"]:
+            click.echo(state["stopped"], err=True)

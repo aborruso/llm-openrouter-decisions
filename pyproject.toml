@@ -47,3 +47,7 @@ dev = ["pytest", "pytest-asyncio", "httpx2-pytest>=2"]
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+# Example scripts mirror the README code, written compact on purpose
+extend-exclude = ["examples"]

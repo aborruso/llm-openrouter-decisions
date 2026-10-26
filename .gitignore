@@ -15,3 +15,5 @@ tasks/
 tmp/
 examples/answers.jsonl
 .claude/
+carousel/bluesky/
+carousel/linkedin-comment.txt

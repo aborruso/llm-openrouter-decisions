@@ -195,28 +195,64 @@ cat report.txt | llm -t urgent
 
 ## Large batches from Python
 
-Each `llm` call in a shell loop starts a new process, about four seconds per row in the loop above. For thousands of rows use the async Python API, which sends the requests concurrently:
+Search [OpenAlex](https://openalex.org/) for scholarly articles with "transparency" in the title and you get a strange mix. Studies on how open local governments are sit next to papers on transparent polymer films, quantum optics, explainable AI and corporate reporting. The word is the same, the subject is not, and a keyword search cannot tell them apart. Can a decision model find the articles about the transparency of governments and public administrations, and how long does it take on hundreds of titles?
+
+[examples/publications.csv](examples/publications.csv) holds 500 titles of English articles from 2024, a random sample with a fixed seed, downloaded by [examples/fetch_publications.sh](examples/fetch_publications.sh) (it needs a free OpenAlex API key in `OPENALEX_API_KEY`). Running the script again gives the same file.
+
+Each `llm` call in a shell loop starts a new process, about four seconds per row in the loop above, so 500 titles would take more than half an hour. The async Python API sends the requests concurrently. This is [examples/batch.py](examples/batch.py):
 ```python
-import asyncio, csv, json
+import asyncio, csv, json, time
+from pathlib import Path
 import llm
 
+HERE = Path(__file__).parent
 model = llm.get_async_model("openrouter-decisions/typesafe/jev-1.14")
-QUESTION = "The publication is about the quality of open government data."
+QUESTION = "The publication is about the transparency of governments or public administrations."
 
-async def ask(title, sem):
+async def ask(row, sem):
     async with sem:
-        response = model.prompt(title, system=QUESTION)
-        return title, json.loads(await response.text())["noul"]
+        response = model.prompt(row["title"], system=QUESTION)
+        p = json.loads(await response.text())["noul"]
+        cost = (await response.json())["usage"]["cost"]
+        return {**row, "p": p}, cost
 
 async def main():
-    titles = [row["title"] for row in csv.DictReader(open("publications.csv"))]
+    rows = list(csv.DictReader(open(HERE / "publications.csv")))
     sem = asyncio.Semaphore(8)
-    for title, p in await asyncio.gather(*(ask(t, sem) for t in titles)):
-        print(f"{p:.2f}  {title}")
+    start = time.perf_counter()
+    results = await asyncio.gather(*(ask(row, sem) for row in rows))
+    seconds = time.perf_counter() - start
+    scored = sorted((r for r, _ in results), key=lambda r: r["p"], reverse=True)
+    with open(HERE / "publications_scored.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["p", "title", "doi"])
+        writer.writeheader()
+        writer.writerows(scored)
+    cost = sum(c for _, c in results)
+    print(f"{len(rows)} titles in {seconds:.1f} seconds, ${cost:.5f}")
 
 asyncio.run(main())
 ```
-On 145 publication titles from [OpenAlex](https://openalex.org/) this took 5.4 seconds.
+Run it from a clone of this repository. The script imports `llm`, so it needs the plugin in the same environment; with [uv](https://docs.astral.sh/uv/) you do not have to install anything, and the OpenRouter key set with `llm keys set openrouter` is picked up:
+```bash
+uv run --no-project --with llm-openrouter-decisions python examples/batch.py
+```
+```
+500 titles in 18.2 seconds, $0.00630
+```
+Eight requests at a time, 500 titles in about 18 seconds for less than one cent. The answers, sorted by probability, are in [examples/publications_scored.csv](examples/publications_scored.csv). 115 titles got 0.5 or more, 249 less than 0.1. A few rows show what the model is reading:
+
+| p | title |
+| - | - |
+| 0.96 | Passive transparency in small brazilian municipalities |
+| 0.96 | Comparing Public Procurement Transparency Mechanisms Between EU Member States |
+| 0.65 | Does Central Bank Transparency Matter for Inflation: Role of Inflation Targeting |
+| 0.62 | Lobbying transparency and attitudes towards interest groups: a survey experiment |
+| 0.08 | CORPORATE GOVERNANCE AND FINANCIAL TRANSPARENCY: EVIDENCE FROM INDONESIAN MANUFACTURING COMPANIES |
+| 0.07 | A state-of-the-art review of AI decision transparency for autonomous shipping |
+| 0.02 | Achieving optical transparency in live animals with absorbing molecules |
+| 0.01 | Switch and phase shift of photon polarization qubits via double Rydberg electromagnetically induced transparency |
+
+A search for "governance" or "state" would have kept the corporate governance paper and the review on autonomous ships; the model puts them at the bottom. Central banks and lobbying rules land in the middle, because they are public matters but not quite public administration: the rows around 0.5 are the ones worth reading by hand, or the sign that the question needs to be more precise. Run the script again and some probabilities change by a few hundredths (up to 0.06 between two runs).
 
 ## Things to know
 

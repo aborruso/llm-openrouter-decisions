@@ -1,5 +1,9 @@
 # Log
 
+## 2026-10-26
+
+- README, "Large batches from Python": new reproducible example. 500 OpenAlex titles with "transparency" (2024, fixed seed) in `examples/publications.csv`, download script `examples/fetch_publications.sh`, `examples/batch.py`, results in `examples/publications_scored.csv`. Measured: 18.2 s, $0.0063; probabilities vary up to 0.06 between runs. The old 145-title file was never committed.
+
 ## 2026-10-25
 
 - README: link to vd-jev, the VisiData plugin for the same Decisions API.

@@ -1,6 +1,6 @@
 [project]
 name = "llm-openrouter-decisions"
-version = "0.1a0"
+version = "0.1a1"
 description = "LLM plugin for the decision models of the OpenRouter Decisions API"
 readme = "README.md"
 authors = [{name = "Andrea Borruso"}]
